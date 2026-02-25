@@ -2,7 +2,27 @@
 #include <fstream>
 #include <iomanip>
 #include <string>
+#include <limits>
 using namespace std;
+
+// Function to safely read a double
+double getDouble(const string& prompt) {
+    double value;
+    while (true) {
+        cout << prompt;
+        cin >> value;
+        if (cin.fail()) {
+            cin.clear(); // clear the error
+            cin.ignore(numeric_limits<streamsize>::max(), '\n'); // discard input
+            cout << "Invalid input! Please enter a numeric value.\n";
+        } else if (value < 0) {
+            cout << "Value cannot be negative! Try again.\n";
+        } else {
+            cin.ignore(numeric_limits<streamsize>::max(), '\n'); // discard remaining input
+            return value;
+        }
+    }
+}
 
 // ==================== Uniform Motion ====================
 void uniformMotion() {
@@ -14,7 +34,6 @@ void uniformMotion() {
     ofstream logfile("UniformMotionLog.txt", ios::app);
     if (!logfile) { cerr << "Error opening log file!\n"; return; }
 
-    // Write header if file empty
     logfile.seekp(0, ios::end);
     if (logfile.tellp() == 0) {
         logfile << left << setw(12) << "Simulation"
@@ -26,9 +45,9 @@ void uniformMotion() {
     }
 
     do {
-        cout << "Enter initial position (m): "; cin >> x0;
-        cout << "Enter velocity (m/s): "; cin >> v;
-        cout << "Enter time (s): "; cin >> t;
+        x0 = getDouble("Enter initial position (m): ");
+        v = getDouble("Enter velocity (m/s): ");
+        t = getDouble("Enter time (s): ");
 
         xf = x0 + v*t;
         last_final_position = xf;
@@ -44,10 +63,10 @@ void uniformMotion() {
                 << setw(20) << xf << endl;
 
         cout << "Calculate again? (y/n): "; cin >> choice;
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
         cout << endl;
     } while(choice == 'y' || choice == 'Y');
 
-    // Summary after loop
     cout << "==================== Summary ====================" << endl;
     cout << "Total simulations run: " << sim_count << endl;
     if(sim_count > 0) cout << "Last final position: " << last_final_position << " m" << endl;
@@ -76,10 +95,10 @@ void uniformAcceleration() {
     }
 
     do {
-        cout << "Enter initial position (m): "; cin >> x0;
-        cout << "Enter initial velocity (m/s): "; cin >> v0;
-        cout << "Enter acceleration (m/s^2): "; cin >> a;
-        cout << "Enter time (s): "; cin >> t;
+        x0 = getDouble("Enter initial position (m): ");
+        v0 = getDouble("Enter initial velocity (m/s): ");
+        a = getDouble("Enter acceleration (m/s^2): ");
+        t = getDouble("Enter time (s): ");
 
         xf = x0 + v0*t + 0.5*a*t*t;
         sim_count++;
@@ -96,6 +115,7 @@ void uniformAcceleration() {
                 << setw(20) << xf << endl;
 
         cout << "Calculate again? (y/n): "; cin >> choice;
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
         cout << endl;
     } while(choice == 'y' || choice == 'Y');
 
@@ -122,8 +142,8 @@ void freeFall() {
     }
 
     do {
-        cout << "Enter initial height (m): "; cin >> y0;
-        cout << "Enter time (s): "; cin >> t;
+        y0 = getDouble("Enter initial height (m): ");
+        t = getDouble("Enter time (s): ");
 
         yf = y0 - 0.5*g*t*t;
         if(yf < 0) yf = 0;
@@ -138,6 +158,7 @@ void freeFall() {
                 << setw(20) << yf << endl;
 
         cout << "Calculate again? (y/n): "; cin >> choice;
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
         cout << endl;
     } while(choice == 'y' || choice == 'Y');
 
@@ -154,7 +175,13 @@ int main() {
         cout << "3. Free Fall\n";
         cout << "4. Exit\n";
         cout << "Choose simulation: ";
-        cin >> option;
+
+        while (!(cin >> option)) {
+            cin.clear();
+            cin.ignore(numeric_limits<streamsize>::max(), '\n');
+            cout << "Invalid input! Enter a number between 1-4: ";
+        }
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
         cout << endl;
 
         switch(option) {
