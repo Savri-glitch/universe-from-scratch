@@ -32,18 +32,16 @@ int main()
     const float airResistance = 0.999f;
     float accelerationX = 400.f;
 
-    bool elasticMode = true;
-
     SimulationType currentSim = SimulationType::None;
     std::vector<Ball> balls;
     int selectedBallIndex = -1;
 
-    // Initial ball
+    // Initial ball (shifted right)
     Ball ball;
     ball.mass = 2.f;
     ball.shape.setRadius(15.f + ball.mass * 5.f);
     ball.shape.setFillColor(sf::Color::Red);
-    ball.shape.setPosition({200.f, 100.f});
+    ball.shape.setPosition({350.f, 100.f});
     balls.push_back(ball);
     selectedBallIndex = 0;
 
@@ -102,22 +100,12 @@ int main()
                     newBall.shape.setRadius(15.f + newBall.mass * 5.f);
                     newBall.shape.setFillColor(sf::Color::Yellow);
                     newBall.shape.setPosition({
-                        200.f + float(rand() % 300),
+                        300.f + float(rand() % 400),
                         100.f
                     });
 
                     balls.push_back(newBall);
                     selectedBallIndex = balls.size() - 1;
-                }
-
-                if (key == sf::Keyboard::Key::E)
-                    elasticMode = !elasticMode;
-
-                if (key == sf::Keyboard::Key::R)
-                {
-                    balls.clear();
-                    selectedBallIndex = -1;
-                    currentSim = SimulationType::None;
                 }
 
                 if (!balls.empty())
@@ -165,37 +153,10 @@ int main()
             b.velocityY *= airResistance;
         }
 
-        // COLLISION
-        for (size_t i = 0; i < balls.size(); ++i)
-        {
-            for (size_t j = i + 1; j < balls.size(); ++j)
-            {
-                auto pos1 = balls[i].shape.getPosition();
-                auto pos2 = balls[j].shape.getPosition();
-
-                float dx = pos2.x - pos1.x;
-                float dy = pos2.y - pos1.y;
-                float distance = std::sqrt(dx * dx + dy * dy);
-                float minDist = balls[i].shape.getRadius() + balls[j].shape.getRadius();
-
-                if (distance < minDist && distance > 0.f)
-                {
-                    float nx = dx / distance;
-                    float ny = dy / distance;
-                    float overlap = minDist - distance;
-
-                    balls[i].shape.move({-nx * overlap / 2.f, -ny * overlap / 2.f});
-                    balls[j].shape.move({nx * overlap / 2.f, ny * overlap / 2.f});
-                }
-            }
-        }
-
-        // DRAW
         window.clear(sf::Color(20, 20, 20));
 
-        // GRID (SFML 3 SAFE)
+        // GRID
         const int gridSpacing = 50;
-
         for (int x = 0; x <= 1000; x += gridSpacing)
         {
             sf::Vertex line[2];
@@ -216,17 +177,58 @@ int main()
             window.draw(line, 2, sf::PrimitiveType::Lines);
         }
 
+        // DRAW BALLS + ARROWS
         for (size_t i = 0; i < balls.size(); i++)
         {
+            auto& b = balls[i];
+
             if ((int)i == selectedBallIndex)
             {
-                balls[i].shape.setOutlineThickness(3.f);
-                balls[i].shape.setOutlineColor(sf::Color::Yellow);
+                b.shape.setOutlineThickness(3.f);
+                b.shape.setOutlineColor(sf::Color::Yellow);
             }
             else
-                balls[i].shape.setOutlineThickness(0.f);
+                b.shape.setOutlineThickness(0.f);
 
-            window.draw(balls[i].shape);
+            window.draw(b.shape);
+
+            // Proper arrow
+            float speed = std::sqrt(b.velocityX*b.velocityX + b.velocityY*b.velocityY);
+
+            if (speed > 1.f)
+            {
+                float arrowScale = 0.25f;
+                float length = speed * arrowScale;
+
+                float angleDeg = std::atan2(b.velocityY, b.velocityX) * 180.f / 3.14159265f;
+                float angleRad = angleDeg * 3.14159265f / 180.f;
+
+                sf::Vector2f center = b.shape.getPosition();
+
+                // Shaft
+                sf::RectangleShape shaft;
+                shaft.setSize({length, 4.f});
+                shaft.setFillColor(sf::Color::Cyan);
+                shaft.setOrigin({0.f, 2.f});
+                shaft.setPosition(center);
+                shaft.setRotation(sf::degrees(angleDeg));
+
+                // Triangle head
+                sf::CircleShape head(8.f, 3);
+                head.setFillColor(sf::Color::Cyan);
+                head.setOrigin({8.f, 8.f});
+
+                sf::Vector2f headPos = {
+                    center.x + std::cos(angleRad) * length,
+                    center.y + std::sin(angleRad) * length
+                };
+
+                head.setPosition(headPos);
+                head.setRotation(sf::degrees(angleDeg + 90.f));
+
+                window.draw(shaft);
+                window.draw(head);
+            }
         }
 
         std::string info = "Balls: " + std::to_string(balls.size());
