@@ -4,58 +4,82 @@
 #include <cstdlib>
 #include <ctime>
 
-struct Atom {
+struct Atom
+{
     sf::CircleShape shape;
-    sf::Vector2f velocity;
-    float mass = 1.f;
+    sf::Vector3f pos;
+    sf::Vector3f velocity;
+
     float radius = 8.f;
     int valence = 1;
     int bonds = 0;
 };
 
-struct Bond {
+struct Bond
+{
     int a;
     int b;
 };
 
-float distance(sf::Vector2f a, sf::Vector2f b)
+float distance3D(sf::Vector3f a, sf::Vector3f b)
 {
     float dx = b.x - a.x;
     float dy = b.y - a.y;
-    return std::sqrt(dx * dx + dy * dy);
+    float dz = b.z - a.z;
+    return std::sqrt(dx*dx + dy*dy + dz*dz);
 }
 
 int main()
 {
     std::srand(static_cast<unsigned>(std::time(nullptr)));
 
-    sf::RenderWindow window(sf::VideoMode({1000, 700}), "Molecule Formation Simulator");
+    sf::RenderWindow window(
+        sf::VideoMode({1000,700}),
+        "Hydrogen Molecule Formation Simulator"
+    );
+
     window.setFramerateLimit(60);
 
     const int atomCount = 25;
-    const float bondingDistance = 25.f;
-    const float bondLength = 20.f;
-    const float temperature = 20.f;
+
+    float bondingDistance = 25.f;
+    float bondLength = 20.f;
+    float temperature = 20.f;
+
+    float epsilon = 50.f;
+    float sigma = 20.f;
+
+    float cameraDistance = 400.f;
+    float cameraAngle = 0.f;
+
+    const float minDistance = 10.f;
+    const float damping = 0.995f;
+    const float maxSpeed = 200.f;
 
     std::vector<Atom> atoms;
     std::vector<Bond> bonds;
+    std::vector<float> energyHistory;
 
-    // Create atoms
-    for (int i = 0; i < atomCount; i++)
+    for(int i=0;i<atomCount;i++)
     {
         Atom atom;
+
         atom.shape.setRadius(atom.radius);
-        atom.shape.setOrigin({atom.radius, atom.radius});
+        atom.shape.setOrigin({atom.radius,atom.radius});
         atom.shape.setFillColor(sf::Color::Cyan);
 
-        atom.shape.setPosition({
-            float(100 + rand() % 800),
-            float(100 + rand() % 500)
-        });
+        atom.pos =
+        {
+            float(rand()%800 - 400),
+            float(rand()%500 - 250),
+            float(rand()%200 - 100)
+        };
 
-        atom.velocity = {
-            float(rand() % 100 - 50),
-            float(rand() % 100 - 50)
+        atom.velocity =
+        {
+            float(rand()%100 - 50),
+            float(rand()%100 - 50),
+            float(rand()%100 - 50)
         };
 
         atoms.push_back(atom);
@@ -63,93 +87,243 @@ int main()
 
     sf::Clock clock;
 
-    while (window.isOpen())
+    while(window.isOpen())
     {
         float dt = clock.restart().asSeconds();
 
-        while (auto event = window.pollEvent())
+        while(auto event = window.pollEvent())
         {
-            if (event->is<sf::Event::Closed>())
+            if(event->is<sf::Event::Closed>())
                 window.close();
         }
 
-        // GAS-LIKE RANDOM MOTION
-        for (auto& atom : atoms)
+        if(sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Left))
+            cameraAngle -= 1.5f * dt;
+
+        if(sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Right))
+            cameraAngle += 1.5f * dt;
+
+        if(sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Up))
+            temperature += 5 * dt;
+
+        if(sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Down))
+            temperature -= 5 * dt;
+
+        float totalEnergy = 0;
+
+        // Lennard-Jones forces
+        for(size_t i=0;i<atoms.size();i++)
         {
-            atom.velocity.x += (rand() % 3 - 1) * temperature * dt;
-            atom.velocity.y += (rand() % 3 - 1) * temperature * dt;
+            for(size_t j=i+1;j<atoms.size();j++)
+            {
+                float d = distance3D(atoms[i].pos, atoms[j].pos);
 
-            atom.shape.move(atom.velocity * dt);
+                if(d < minDistance)
+                    d = minDistance;
 
-            // Wall bounce
-            auto pos = atom.shape.getPosition();
-            if (pos.x < 0 || pos.x > 1000)
-                atom.velocity.x *= -1;
-            if (pos.y < 0 || pos.y > 700)
-                atom.velocity.y *= -1;
+                float sr = sigma/d;
+                float sr6 = pow(sr,6);
+                float sr12 = sr6*sr6;
+
+                float potential = 4*epsilon*(sr12 - sr6);
+                totalEnergy += potential;
+
+                float force = 24*epsilon*(2*sr12 - sr6)/(d*d);
+
+                sf::Vector3f dir =
+                {
+                    (atoms[j].pos.x - atoms[i].pos.x)/d,
+                    (atoms[j].pos.y - atoms[i].pos.y)/d,
+                    (atoms[j].pos.z - atoms[i].pos.z)/d
+                };
+
+                atoms[i].velocity += dir * force * dt;
+                atoms[j].velocity -= dir * force * dt;
+            }
         }
 
-        // CHECK BONDING
-        for (size_t i = 0; i < atoms.size(); i++)
+        energyHistory.push_back(totalEnergy);
+        if(energyHistory.size() > 800)
+            energyHistory.erase(energyHistory.begin());
+
+        // Motion + stabilization
+        for(auto& atom:atoms)
         {
-            for (size_t j = i + 1; j < atoms.size(); j++)
+            atom.velocity.x += (rand()%3 -1)*temperature*dt;
+            atom.velocity.y += (rand()%3 -1)*temperature*dt;
+            atom.velocity.z += (rand()%3 -1)*temperature*dt;
+
+            atom.velocity *= damping;
+
+            float speed = std::sqrt(
+                atom.velocity.x*atom.velocity.x +
+                atom.velocity.y*atom.velocity.y +
+                atom.velocity.z*atom.velocity.z
+            );
+
+            if(speed > maxSpeed)
+                atom.velocity *= maxSpeed/speed;
+
+            atom.pos += atom.velocity * dt;
+        }
+
+        // Bond forming
+        for(size_t i=0;i<atoms.size();i++)
+        {
+            for(size_t j=i+1;j<atoms.size();j++)
             {
-                if (atoms[i].bonds >= atoms[i].valence) continue;
-                if (atoms[j].bonds >= atoms[j].valence) continue;
+                if(atoms[i].bonds >= atoms[i].valence) continue;
+                if(atoms[j].bonds >= atoms[j].valence) continue;
 
-                float d = distance(atoms[i].shape.getPosition(),
-                                   atoms[j].shape.getPosition());
+                float d = distance3D(atoms[i].pos,atoms[j].pos);
 
-                if (d < bondingDistance)
+                if(d < bondingDistance)
                 {
-                    bonds.push_back({(int)i, (int)j});
+                    bonds.push_back({(int)i,(int)j});
                     atoms[i].bonds++;
                     atoms[j].bonds++;
                 }
             }
         }
 
-        // MAINTAIN BOND LENGTH
-        for (auto& bond : bonds)
+        // Maintain bond length
+        for(auto& bond:bonds)
         {
             auto& a = atoms[bond.a];
             auto& b = atoms[bond.b];
 
-            sf::Vector2f posA = a.shape.getPosition();
-            sf::Vector2f posB = b.shape.getPosition();
-
-            float dx = posB.x - posA.x;
-            float dy = posB.y - posA.y;
-            float d = std::sqrt(dx * dx + dy * dy);
-
-            if (d == 0) continue;
+            float d = distance3D(a.pos,b.pos);
+            if(d == 0) continue;
 
             float diff = d - bondLength;
-            float nx = dx / d;
-            float ny = dy / d;
 
-            a.shape.move({ nx * diff * 0.5f, ny * diff * 0.5f });
-            b.shape.move({-nx * diff * 0.5f, -ny * diff * 0.5f });
+            sf::Vector3f dir =
+            {
+                (b.pos.x - a.pos.x)/d,
+                (b.pos.y - a.pos.y)/d,
+                (b.pos.z - a.pos.z)/d
+            };
+
+            a.pos += dir*diff*0.5f;
+            b.pos -= dir*diff*0.5f;
         }
 
-        // DRAW
-        window.clear(sf::Color(15, 15, 30));
+        window.clear(sf::Color(15,15,30));
 
-        // Draw bonds
-        for (auto& bond : bonds)
+        sf::RectangleShape graphBG({1000,120});
+        graphBG.setPosition({0,580});
+        graphBG.setFillColor(sf::Color(25,25,40));
+        window.draw(graphBG);
+
+        float maxEnergy = -1e9;
+        float minEnergy = 1e9;
+
+        for(float e : energyHistory)
         {
+            if(e > maxEnergy) maxEnergy = e;
+            if(e < minEnergy) minEnergy = e;
+        }
+
+        float range = maxEnergy - minEnergy;
+        if(range == 0) range = 1;
+
+        float graphWidth = 1000.f;
+        float graphHeight = 110.f;
+        float baseY = 690.f;
+
+        for(size_t i=1;i<energyHistory.size();i++)
+        {
+            float x1 = (i-1)*(graphWidth/energyHistory.size());
+            float x2 = i*(graphWidth/energyHistory.size());
+
+            float y1 = baseY - ((energyHistory[i-1]-minEnergy)/range)*graphHeight;
+            float y2 = baseY - ((energyHistory[i]-minEnergy)/range)*graphHeight;
+
             sf::Vertex line[2];
-            line[0].position = atoms[bond.a].shape.getPosition();
+
+            line[0].position = {x1,y1};
+            line[1].position = {x2,y2};
+
+            line[0].color = sf::Color::Green;
+            line[1].color = sf::Color::Green;
+
+            window.draw(line,2,sf::PrimitiveType::Lines);
+        }
+
+        for(auto& bond:bonds)
+        {
+            sf::Vector3f pa = atoms[bond.a].pos;
+            sf::Vector3f pb = atoms[bond.b].pos;
+
+            float cosA = cos(cameraAngle);
+            float sinA = sin(cameraAngle);
+
+            float ax = pa.x*cosA - pa.z*sinA;
+            float az = pa.x*sinA + pa.z*cosA;
+
+            float bx = pb.x*cosA - pb.z*sinA;
+            float bz = pb.x*sinA + pb.z*cosA;
+
+            float scaleA = cameraDistance/(cameraDistance + az);
+            float scaleB = cameraDistance/(cameraDistance + bz);
+
+            sf::Vector2f screenA =
+            {
+                500 + ax*scaleA,
+                350 + pa.y*scaleA
+            };
+
+            sf::Vector2f screenB =
+            {
+                500 + bx*scaleB,
+                350 + pb.y*scaleB
+            };
+
+            sf::Vertex line[2];
+
+            line[0].position = screenA;
+            line[1].position = screenB;
+
             line[0].color = sf::Color::White;
-            line[1].position = atoms[bond.b].shape.getPosition();
             line[1].color = sf::Color::White;
 
-            window.draw(line, 2, sf::PrimitiveType::Lines);
+            window.draw(line,2,sf::PrimitiveType::Lines);
         }
 
-        // Draw atoms
-        for (auto& atom : atoms)
+        for(auto& atom:atoms)
+        {
+            float cosA = cos(cameraAngle);
+            float sinA = sin(cameraAngle);
+
+            float rx = atom.pos.x*cosA - atom.pos.z*sinA;
+            float rz = atom.pos.x*sinA + atom.pos.z*cosA;
+
+            float scale = cameraDistance/(cameraDistance + rz);
+
+            float screenX = 500 + rx*scale;
+            float screenY = 350 + atom.pos.y*scale;
+
+            for(int i=3;i>=1;i--)
+            {
+                float r = atom.radius*(i*1.8f);
+
+                sf::CircleShape cloud(r);
+                cloud.setOrigin({r,r});
+                cloud.setPosition({screenX,screenY});
+
+                int alpha = 20 + i*20;
+
+                cloud.setFillColor(sf::Color(120,120,255,alpha));
+                cloud.setScale({scale,scale});
+
+                window.draw(cloud);
+            }
+
+            atom.shape.setPosition({screenX,screenY});
+            atom.shape.setScale({scale,scale});
+
             window.draw(atom.shape);
+        }
 
         window.display();
     }
