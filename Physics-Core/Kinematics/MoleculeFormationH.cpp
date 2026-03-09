@@ -13,6 +13,8 @@ struct Atom
     float radius = 8.f;
     int valence = 1;
     int bonds = 0;
+
+    std::vector<sf::Vector3f> trail;
 };
 
 struct Bond
@@ -66,7 +68,6 @@ int main()
 
         atom.shape.setRadius(atom.radius);
         atom.shape.setOrigin({atom.radius,atom.radius});
-        atom.shape.setFillColor(sf::Color::Cyan);
 
         atom.pos =
         {
@@ -97,11 +98,18 @@ int main()
                 window.close();
         }
 
+        // CAMERA CONTROLS
         if(sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Left))
             cameraAngle -= 1.5f * dt;
 
         if(sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Right))
             cameraAngle += 1.5f * dt;
+
+        if(sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Q))
+            cameraDistance -= 200 * dt;
+
+        if(sf::Keyboard::isKeyPressed(sf::Keyboard::Key::E))
+            cameraDistance += 200 * dt;
 
         if(sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Up))
             temperature += 5 * dt;
@@ -146,7 +154,7 @@ int main()
         if(energyHistory.size() > 800)
             energyHistory.erase(energyHistory.begin());
 
-        // Motion + stabilization
+        // MOTION
         for(auto& atom:atoms)
         {
             atom.velocity.x += (rand()%3 -1)*temperature*dt;
@@ -165,9 +173,14 @@ int main()
                 atom.velocity *= maxSpeed/speed;
 
             atom.pos += atom.velocity * dt;
+
+            // TRAIL
+            atom.trail.push_back(atom.pos);
+            if(atom.trail.size() > 20)
+                atom.trail.erase(atom.trail.begin());
         }
 
-        // Bond forming
+        // BOND FORMATION
         for(size_t i=0;i<atoms.size();i++)
         {
             for(size_t j=i+1;j<atoms.size();j++)
@@ -186,7 +199,7 @@ int main()
             }
         }
 
-        // Maintain bond length
+        // MAINTAIN BOND LENGTH
         for(auto& bond:bonds)
         {
             auto& a = atoms[bond.a];
@@ -210,6 +223,7 @@ int main()
 
         window.clear(sf::Color(15,15,30));
 
+        // ENERGY GRAPH BACKGROUND
         sf::RectangleShape graphBG({1000,120});
         graphBG.setPosition({0,580});
         graphBG.setFillColor(sf::Color(25,25,40));
@@ -227,17 +241,13 @@ int main()
         float range = maxEnergy - minEnergy;
         if(range == 0) range = 1;
 
-        float graphWidth = 1000.f;
-        float graphHeight = 110.f;
-        float baseY = 690.f;
-
         for(size_t i=1;i<energyHistory.size();i++)
         {
-            float x1 = (i-1)*(graphWidth/energyHistory.size());
-            float x2 = i*(graphWidth/energyHistory.size());
+            float x1 = (i-1)*(1000.f/energyHistory.size());
+            float x2 = i*(1000.f/energyHistory.size());
 
-            float y1 = baseY - ((energyHistory[i-1]-minEnergy)/range)*graphHeight;
-            float y2 = baseY - ((energyHistory[i]-minEnergy)/range)*graphHeight;
+            float y1 = 690 - ((energyHistory[i-1]-minEnergy)/range)*110;
+            float y2 = 690 - ((energyHistory[i]-minEnergy)/range)*110;
 
             sf::Vertex line[2];
 
@@ -250,13 +260,14 @@ int main()
             window.draw(line,2,sf::PrimitiveType::Lines);
         }
 
+        float cosA = cos(cameraAngle);
+        float sinA = sin(cameraAngle);
+
+        // DRAW BONDS (GLOW)
         for(auto& bond:bonds)
         {
             sf::Vector3f pa = atoms[bond.a].pos;
             sf::Vector3f pb = atoms[bond.b].pos;
-
-            float cosA = cos(cameraAngle);
-            float sinA = sin(cameraAngle);
 
             float ax = pa.x*cosA - pa.z*sinA;
             float az = pa.x*sinA + pa.z*cosA;
@@ -267,34 +278,28 @@ int main()
             float scaleA = cameraDistance/(cameraDistance + az);
             float scaleB = cameraDistance/(cameraDistance + bz);
 
-            sf::Vector2f screenA =
+            sf::Vector2f A = {500 + ax*scaleA, 350 + pa.y*scaleA};
+            sf::Vector2f B = {500 + bx*scaleB, 350 + pb.y*scaleB};
+
+            for(int i=3;i>=1;i--)
             {
-                500 + ax*scaleA,
-                350 + pa.y*scaleA
-            };
+                sf::Vertex line[2];
 
-            sf::Vector2f screenB =
-            {
-                500 + bx*scaleB,
-                350 + pb.y*scaleB
-            };
+                line[0].position = A;
+                line[1].position = B;
 
-            sf::Vertex line[2];
+                int alpha = 60 + i*60;
 
-            line[0].position = screenA;
-            line[1].position = screenB;
+                line[0].color = sf::Color(120,200,255,alpha);
+                line[1].color = sf::Color(120,200,255,alpha);
 
-            line[0].color = sf::Color::White;
-            line[1].color = sf::Color::White;
-
-            window.draw(line,2,sf::PrimitiveType::Lines);
+                window.draw(line,2,sf::PrimitiveType::Lines);
+            }
         }
 
+        // DRAW ATOMS
         for(auto& atom:atoms)
         {
-            float cosA = cos(cameraAngle);
-            float sinA = sin(cameraAngle);
-
             float rx = atom.pos.x*cosA - atom.pos.z*sinA;
             float rz = atom.pos.x*sinA + atom.pos.z*cosA;
 
@@ -303,6 +308,19 @@ int main()
             float screenX = 500 + rx*scale;
             float screenY = 350 + atom.pos.y*scale;
 
+            // ENERGY COLOR
+            float speed = std::sqrt(
+                atom.velocity.x*atom.velocity.x +
+                atom.velocity.y*atom.velocity.y +
+                atom.velocity.z*atom.velocity.z
+            );
+
+            int r = std::min(255,(int)(speed*2));
+            int b = 255-r;
+
+            atom.shape.setFillColor(sf::Color(r,120,b));
+
+            // ELECTRON CLOUD
             for(int i=3;i>=1;i--)
             {
                 float r = atom.radius*(i*1.8f);
@@ -310,10 +328,7 @@ int main()
                 sf::CircleShape cloud(r);
                 cloud.setOrigin({r,r});
                 cloud.setPosition({screenX,screenY});
-
-                int alpha = 20 + i*20;
-
-                cloud.setFillColor(sf::Color(120,120,255,alpha));
+                cloud.setFillColor(sf::Color(120,120,255,30+i*20));
                 cloud.setScale({scale,scale});
 
                 window.draw(cloud);
