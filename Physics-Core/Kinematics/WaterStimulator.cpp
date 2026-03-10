@@ -1,13 +1,12 @@
 #include <SFML/Graphics.hpp>
 #include <vector>
 #include <cmath>
+#include <cstdlib>
 
 struct Particle
 {
     sf::Vector2f pos;
     sf::Vector2f vel;
-    float density = 0;
-    float pressure = 0;
 };
 
 float length(sf::Vector2f v)
@@ -20,27 +19,24 @@ int main()
     sf::RenderWindow window(sf::VideoMode({900,700}), "Particle Water Simulator");
     window.setFramerateLimit(60);
 
-    const int particleCount = 600;
+    const int particleCount = 500;
 
-    const float restDensity = 1000.f;
-    const float gasConstant = 2000.f;
-    const float viscosity = 0.1f;
-
-    const float smoothingRadius = 16.f;
-    const float mass = 1.f;
-
-    const float gravity = 1200.f;
+    const float gravity = 900.f;
+    const float interactionRadius = 20.f;
+    const float stiffness = 0.4f;
+    const float damping = 0.995f;
 
     std::vector<Particle> particles;
 
+    // Spawn water blob
     for(int i=0;i<particleCount;i++)
     {
         Particle p;
 
         p.pos =
         {
-            200 + float(rand()%300),
-            100 + float(rand()%300)
+            350 + float(rand()%200),
+            100 + float(rand()%200)
         };
 
         p.vel = {0,0};
@@ -63,82 +59,61 @@ int main()
                 window.close();
         }
 
-        // Density calculation
-        for(auto &pi : particles)
+        // Apply gravity
+        for(auto &p : particles)
         {
-            pi.density = 0;
-
-            for(auto &pj : particles)
-            {
-                float r = length(pi.pos - pj.pos);
-
-                if(r < smoothingRadius)
-                {
-                    float term = (smoothingRadius*smoothingRadius - r*r);
-                    pi.density += mass * term * term * term;
-                }
-            }
-
-            pi.pressure = gasConstant * (pi.density - restDensity);
+            p.vel.y += gravity * dt;
         }
 
-        // Forces
-        for(auto &pi : particles)
+        // Particle interaction (fluid-like behavior)
+        for(size_t i=0;i<particles.size();i++)
         {
-            sf::Vector2f pressureForce(0,0);
-            sf::Vector2f viscosityForce(0,0);
-
-            for(auto &pj : particles)
+            for(size_t j=i+1;j<particles.size();j++)
             {
-                if(&pi == &pj) continue;
+                sf::Vector2f diff = particles[j].pos - particles[i].pos;
+                float dist = length(diff);
 
-                sf::Vector2f rij = pj.pos - pi.pos;
-                float r = length(rij);
-
-                if(r < smoothingRadius && r > 0)
+                if(dist < interactionRadius && dist > 0)
                 {
-                    sf::Vector2f dir = rij / r;
+                    sf::Vector2f dir = diff / dist;
 
-                    pressureForce += -dir * mass *
-                        (pi.pressure + pj.pressure) / (2 * pj.density);
+                    float force = (interactionRadius - dist) * stiffness;
 
-                    viscosityForce += viscosity *
-                        (pj.vel - pi.vel);
+                    particles[i].vel -= dir * force;
+                    particles[j].vel += dir * force;
                 }
             }
-
-            sf::Vector2f gravityForce(0, gravity * pi.density);
-
-            sf::Vector2f force =
-                pressureForce +
-                viscosityForce +
-                gravityForce;
-
-            pi.vel += force / pi.density * dt;
         }
 
         // Integrate motion
         for(auto &p : particles)
         {
+            p.vel *= damping;
             p.pos += p.vel * dt;
 
-            // Container walls
+            // Walls
             if(p.pos.x < 10)
             {
                 p.pos.x = 10;
-                p.vel.x *= -0.5;
+                p.vel.x *= -0.5f;
             }
 
             if(p.pos.x > 890)
             {
                 p.pos.x = 890;
-                p.vel.x *= -0.5;
+                p.vel.x *= -0.5f;
             }
 
             if(p.pos.y > 690)
             {
                 p.pos.y = 690;
-                p.vel.y *= -0.5;
+                p.vel.y *= -0.5f;
+            }
+
+            if(p.pos.y < 10)
+            {
+                p.pos.y = 10;
+                p.vel.y *= -0.5f;
             }
         }
 
