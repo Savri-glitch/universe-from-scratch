@@ -1,185 +1,522 @@
 #include <SFML/Graphics.hpp>
-#include <cmath>
 #include <vector>
+#include <cmath>
+#include <optional>
+#include <algorithm>
 
-const int WIDTH = 1200;
-const int HEIGHT = 800;
+const int WIDTH = 1400;
+const int HEIGHT = 900;
 
-const float GRID_SPACING = 40.f;
-const float K = 9000.f; // this will work as scaled Coulomb constant
+const float K = 5000.f;
+const float GRID = 45.f;
 
 struct Charge {
-    sf::Vector2f position;
-    float q; // charge here 
+    sf::Vector2f pos;
+    float q;
 };
 
-float magnitude(sf::Vector2f v) {
+std::vector<Charge> charges;
+
+float magnitude(const sf::Vector2f& v) {
     return std::sqrt(v.x * v.x + v.y * v.y);
 }
 
-sf::Vector2f normalize(sf::Vector2f v) {
+sf::Vector2f normalize(const sf::Vector2f& v) {
+
     float mag = magnitude(v);
 
-    if (mag == 0)
-        return sf::Vector2f(0.f, 0.f);
+    if (mag == 0.f)
+        return {0.f, 0.f};
 
-    return sf::Vector2f(v.x / mag, v.y / mag);
+    return {v.x / mag, v.y / mag};
+}
+
+sf::Vector2f electricField(sf::Vector2f p) {
+
+    sf::Vector2f E(0.f, 0.f);
+
+    for (const auto& c : charges) {
+
+        sf::Vector2f r = p - c.pos;
+
+        float dist = magnitude(r);
+
+        if (dist < 12.f)
+            continue;
+
+        sf::Vector2f dir = normalize(r);
+
+        float strength =
+            (K * c.q) / (dist * dist);
+
+        E += dir * strength;
+    }
+
+    return E;
+}
+
+void drawGrid(
+    sf::RenderWindow& window,
+    sf::View& camera
+) {
+
+    sf::Vector2f center = camera.getCenter();
+    sf::Vector2f size = camera.getSize();
+
+    float left = center.x - size.x / 2.f;
+    float right = center.x + size.x / 2.f;
+
+    float top = center.y - size.y / 2.f;
+    float bottom = center.y + size.y / 2.f;
+
+    sf::VertexArray lines(sf::PrimitiveType::Lines);
+
+    for (float x = std::floor(left / GRID) * GRID;
+         x < right;
+         x += GRID) {
+
+        lines.append({
+            {x, top},
+            sf::Color(30, 30, 40)
+        });
+
+        lines.append({
+            {x, bottom},
+            sf::Color(30, 30, 40)
+        });
+    }
+
+    for (float y = std::floor(top / GRID) * GRID;
+         y < bottom;
+         y += GRID) {
+
+        lines.append({
+            {left, y},
+            sf::Color(30, 30, 40)
+        });
+
+        lines.append({
+            {right, y},
+            sf::Color(30, 30, 40)
+        });
+    }
+
+    window.draw(lines);
+}
+
+void drawField(
+    sf::RenderWindow& window,
+    sf::View& camera
+) {
+
+    sf::Vector2f center = camera.getCenter();
+    sf::Vector2f size = camera.getSize();
+
+    float left = center.x - size.x / 2.f;
+    float right = center.x + size.x / 2.f;
+
+    float top = center.y - size.y / 2.f;
+    float bottom = center.y + size.y / 2.f;
+
+    for (float x = left; x < right; x += GRID) {
+
+        for (float y = top; y < bottom; y += GRID) {
+
+            sf::Vector2f point(x, y);
+
+            sf::Vector2f E =
+                electricField(point);
+
+            float mag = magnitude(E);
+
+            if (mag < 0.01f)
+                continue;
+
+            sf::Vector2f dir =
+                normalize(E);
+
+            float len =
+                std::min(18.f, mag * 0.08f);
+
+            sf::Vertex arrow[] = {
+
+                {
+                    point,
+                    sf::Color::Cyan
+                },
+
+                {
+                    point + dir * len,
+                    sf::Color::White
+                }
+            };
+
+            window.draw(
+                arrow,
+                2,
+                sf::PrimitiveType::Lines
+            );
+        }
+    }
+}
+
+void traceFieldLine(
+    sf::RenderWindow& window,
+    sf::Vector2f start
+) {
+
+    sf::VertexArray line(
+        sf::PrimitiveType::LineStrip
+    );
+
+    sf::Vector2f current = start;
+
+    for (int i = 0; i < 350; i++) {
+
+        sf::Vector2f E =
+            electricField(current);
+
+        float mag = magnitude(E);
+
+        if (mag < 0.001f)
+            break;
+
+        sf::Vector2f dir =
+            normalize(E);
+
+        line.append({
+            current,
+            sf::Color::Yellow
+        });
+
+        float step =
+            std::clamp(
+                mag * 0.02f,
+                2.f,
+                8.f
+            );
+
+        current += dir * step;
+
+        for (const auto& c : charges) {
+
+            if (
+                magnitude(
+                    current - c.pos
+                ) < 10.f
+            ) {
+                window.draw(line);
+                return;
+            }
+        }
+    }
+
+    window.draw(line);
+}
+
+void drawFieldLines(
+    sf::RenderWindow& window
+) {
+
+    for (const auto& c : charges) {
+
+        if (c.q <= 0)
+            continue;
+
+        int seeds = 18;
+
+        for (int i = 0; i < seeds; i++) {
+
+            float angle =
+                (2.f * 3.1415926f * i)
+                / seeds;
+
+            sf::Vector2f offset(
+                std::cos(angle) * 16.f,
+                std::sin(angle) * 16.f
+            );
+
+            traceFieldLine(
+                window,
+                c.pos + offset
+            );
+        }
+    }
+}
+
+void drawCharges(
+    sf::RenderWindow& window
+) {
+
+    for (const auto& c : charges) {
+
+        float radius =
+            10.f + std::abs(c.q) * 2.f;
+
+        sf::CircleShape shape(radius);
+
+        shape.setOrigin({
+            radius,
+            radius
+        });
+
+        shape.setPosition(c.pos);
+
+        if (c.q > 0)
+            shape.setFillColor(
+                sf::Color::Red
+            );
+        else
+            shape.setFillColor(
+                sf::Color::Blue
+            );
+
+        window.draw(shape);
+    }
+}
+
+void drawGaussianSurface(
+    sf::RenderWindow& window
+) {
+
+    sf::CircleShape surface(140.f);
+
+    surface.setOrigin({
+        140.f,
+        140.f
+    });
+
+    surface.setPosition({
+        0.f,
+        0.f
+    });
+
+    surface.setFillColor(
+        sf::Color::Transparent
+    );
+
+    surface.setOutlineThickness(2.f);
+
+    surface.setOutlineColor(
+        sf::Color(255,255,255,120)
+    );
+
+    window.draw(surface);
+}
+
+void addDipole(
+    sf::Vector2f center
+) {
+
+    charges.push_back({
+        center +
+        sf::Vector2f(-70.f, 0.f),
+        2.f
+    });
+
+    charges.push_back({
+        center +
+        sf::Vector2f(70.f, 0.f),
+        -2.f
+    });
 }
 
 int main() {
+
     sf::RenderWindow window(
-        sf::VideoMode({WIDTH, HEIGHT}),
-        "Electric Field Simulator - SFML 3"
+        sf::VideoMode({
+            WIDTH,
+            HEIGHT
+        }),
+        "Electrostatics Sandbox"
     );
 
     window.setFramerateLimit(60);
 
-    std::vector<Charge> charges;
+    sf::View camera(
+        sf::FloatRect(
+            {-700.f, -450.f},
+            {1400.f, 900.f}
+        )
+    );
 
-    // hereee goes the initial charges
-    charges.push_back({sf::Vector2f(400.f, 400.f), 1.f});
-    charges.push_back({sf::Vector2f(800.f, 400.f), -1.f});
+    charges.push_back({
+        {-120.f, 0.f},
+        2.f
+    });
+
+    charges.push_back({
+        {120.f, 0.f},
+        -2.f
+    });
 
     bool dragging = false;
-    int selectedCharge = -1;
+    int selected = -1;
 
     while (window.isOpen()) {
 
-        while (const std::optional event = window.pollEvent()) {
+        while (const std::optional event =
+               window.pollEvent()) {
 
-            if (event->is<sf::Event::Closed>()) {
+            if (
+                event->is<
+                sf::Event::Closed>()
+            ) {
                 window.close();
             }
 
-            // Mouse pressed stuff
-            if (const auto* mousePressed =
-                    event->getIf<sf::Event::MouseButtonPressed>()) {
+            if (const auto* wheel =
+                event->getIf<
+                sf::Event::MouseWheelScrolled>()
+            ) {
 
-                if (mousePressed->button == sf::Mouse::Button::Left) {
+                if (wheel->delta > 0)
+                    camera.zoom(0.9f);
+                else
+                    camera.zoom(1.1f);
+            }
 
-                    sf::Vector2f mousePos =
-                        window.mapPixelToCoords(mousePressed->position);
+            if (const auto* key =
+                event->getIf<
+                sf::Event::KeyPressed>()
+            ) {
 
-                    for (int i = 0; i < charges.size(); i++) {
+                if (
+                    key->code ==
+                    sf::Keyboard::Key::P
+                ) {
+                    addDipole({0.f,0.f});
+                }
+            }
 
-                        float dx = mousePos.x - charges[i].position.x;
-                        float dy = mousePos.y - charges[i].position.y;
+            if (const auto* mouse =
+                event->getIf<
+                sf::Event::MouseButtonPressed>()
+            ) {
 
-                        if (std::sqrt(dx * dx + dy * dy) < 20.f) {
+                sf::Vector2f world =
+                    window.mapPixelToCoords(
+                        mouse->position,
+                        camera
+                    );
+
+                if (
+                    mouse->button ==
+                    sf::Mouse::Button::Left
+                ) {
+
+                    for (int i = 0;
+                         i < charges.size();
+                         i++) {
+
+                        if (
+                            magnitude(
+                                world -
+                                charges[i].pos
+                            ) < 20.f
+                        ) {
+
                             dragging = true;
-                            selectedCharge = i;
+                            selected = i;
                         }
                     }
                 }
 
-                // Right click should add positive charge
-                if (mousePressed->button == sf::Mouse::Button::Right) {
+                if (
+                    mouse->button ==
+                    sf::Mouse::Button::Right
+                ) {
 
-                    sf::Vector2f mousePos =
-                        window.mapPixelToCoords(mousePressed->position);
-
-                    charges.push_back({mousePos, 1.f});
+                    charges.push_back({
+                        world,
+                        1.f
+                    });
                 }
 
-                // Middle click should add negative charge
-                if (mousePressed->button == sf::Mouse::Button::Middle) {
+                if (
+                    mouse->button ==
+                    sf::Mouse::Button::Middle
+                ) {
 
-                    sf::Vector2f mousePos =
-                        window.mapPixelToCoords(mousePressed->position);
-
-                    charges.push_back({mousePos, -1.f});
+                    charges.push_back({
+                        world,
+                        -1.f
+                    });
                 }
             }
 
-            // when mouse is released
-            if (event->is<sf::Event::MouseButtonReleased>()) {
+            if (
+                event->is<
+                sf::Event::MouseButtonReleased>()
+            ) {
+
                 dragging = false;
-                selectedCharge = -1;
+                selected = -1;
             }
 
-            // Mouse moved
-            if (const auto* mouseMoved =
-                    event->getIf<sf::Event::MouseMoved>()) {
+            if (const auto* moved =
+                event->getIf<
+                sf::Event::MouseMoved>())
+            {
 
-                if (dragging && selectedCharge != -1) {
+                if (
+                    dragging &&
+                    selected != -1
+                ) {
 
-                    sf::Vector2f mousePos =
-                        window.mapPixelToCoords(mouseMoved->position);
+                    sf::Vector2f world =
+                        window.mapPixelToCoords(
+                            moved->position,
+                            camera
+                        );
 
-                    charges[selectedCharge].position = mousePos;
+                    charges[selected].pos =
+                        world;
                 }
             }
         }
 
-        window.clear(sf::Color(20, 20, 30));
+        float move = 10.f;
 
-        // Drawing the electric field vectors 
-        for (float x = 0; x < WIDTH; x += GRID_SPACING) {
+        if (
+            sf::Keyboard::isKeyPressed(
+            sf::Keyboard::Key::W)
+        )
+            camera.move({0.f, -move});
 
-            for (float y = 0; y < HEIGHT; y += GRID_SPACING) {
+        if (
+            sf::Keyboard::isKeyPressed(
+            sf::Keyboard::Key::S)
+        )
+            camera.move({0.f, move});
 
-                sf::Vector2f field(0.f, 0.f);
+        if (
+            sf::Keyboard::isKeyPressed(
+            sf::Keyboard::Key::A)
+        )
+            camera.move({-move, 0.f});
 
-                for (const auto& charge : charges) {
+        if (
+            sf::Keyboard::isKeyPressed(
+            sf::Keyboard::Key::D)
+        )
+            camera.move({move, 0.f});
 
-                    sf::Vector2f r = {
-                        x - charge.position.x,
-                        y - charge.position.y
-                    };
+        window.setView(camera);
 
-                    float dist = magnitude(r);
+        window.clear(
+            sf::Color(10,10,18)
+        );
 
-                    if (dist < 15.f)
-                        continue;
+        drawGrid(window, camera);
 
-                    sf::Vector2f dir = normalize(r);
+        drawField(window, camera);
 
-                    float strength = (K * charge.q) / (dist * dist);
+        drawFieldLines(window);
 
-                    field += dir * strength;
-                }
+        drawGaussianSurface(window);
 
-                float fieldMag = magnitude(field);
-
-                if (fieldMag > 0.f) {
-
-                    sf::Vector2f dir = normalize(field);
-
-                    float arrowLength = 15.f;
-
-                    sf::Vertex line[] = {
-                        sf::Vertex(
-                            sf::Vector2f(x, y),
-                            sf::Color::White
-                        ),
-                        sf::Vertex(
-                            sf::Vector2f(
-                                x + dir.x * arrowLength,
-                                y + dir.y * arrowLength
-                            ),
-                            sf::Color::Cyan
-                        )
-                    };
-
-                    window.draw(line, 2, sf::PrimitiveType::Lines);
-                }
-            }
-        }
-
-        // Draw charges here
-        for (const auto& charge : charges) {
-
-            sf::CircleShape circle(15.f);
-            circle.setOrigin({15.f, 15.f});
-            circle.setPosition(charge.position);
-
-            if (charge.q > 0)
-                circle.setFillColor(sf::Color::Red);
-            else
-                circle.setFillColor(sf::Color::Blue);
-
-            window.draw(circle);
-        }
+        drawCharges(window);
 
         window.display();
     }
